@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - {{ university.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Header -->
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <h1 class="h3">
+                <i class="fas fa-university text-primary"></i>
+                {{ university.name }}
+            </h1>
+            <p class="text-muted">Gerenciamento de Documentos de Estágio</p>
+        </div>
+        <div class="col-md-4 text-end">
+            <a href="{% url 'university_send_document' %}" class="btn btn-primary btn-lg">
+                <i class="fas fa-paper-plane"></i> Enviar Novo Documento
+            </a>
+        </div>
+    </div>
+
+    <!-- Status Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card border-warning">
+                <div class="card-body text-center">
+                    <h3 class="text-warning">{{ status_counts.pending }}</h3>
+                    <p class="mb-0">Aguardando Assinatura</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-success">
+                <div class="card-body text-center">
+                    <h3 class="text-success">{{ status_counts.signed }}</h3>
+                    <p class="mb-0">Assinados</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-info">
+                <div class="card-body text-center">
+                    <h3 class="text-info">{{ status_counts.completed }}</h3>
+                    <p class="mb-0">Concluídos</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-secondary">
+                <div class="card-body text-center">
+                    <h3 class="text-secondary">{{ status_counts.total }}</h3>
+                    <p class="mb-0">Total</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lista de Documentos -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">
+                <i class="fas fa-file-alt"></i> Documentos Enviados
+            </h5>
+        </div>
+        <div class="card-body">
+            {% if documents %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Título</th>
+                            <th>Escola de Saúde</th>
+                            <th>Status</th>
+                            <th>Enviado em</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for document in documents %}
+                        <tr>
+                            <td>
+                                <strong>{{ document.title }}</strong>
+                                <br><small class="text-muted">{{ document.description|truncatewords:10 }}</small>
+                            </td>
+                            <td>{{ document.health_school.name }}</td>
+                            <td>
+                                {% if document.status == 'pending_health_school' %}
+                                <span class="badge bg-warning">
+                                    <i class="fas fa-clock"></i> Aguardando Assinatura
+                                </span>
+                                {% elif document.status == 'signed_health_school' %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check-circle"></i> Assinado
+                                </span>
+                                {% elif document.status == 'completed' %}
+                                <span class="badge bg-info">
+                                    <i class="fas fa-check-double"></i> Concluído
+                                </span>
+                                {% endif %}
+                            </td>
+                            <td>{{ document.created_at|date:"d/m/Y H:i" }}</td>
+                            <td>
+                                <a href="{% url 'university_view_document' document.id %}" 
+                                   class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-eye"></i> Visualizar
+                                </a>
+                                <a href="{% url 'download_original_document' document.id %}" 
+                                   class="btn btn-sm btn-outline-secondary">
+                                    <i class="fas fa-download"></i> Original
+                                </a>
+                                {% if document.signed_file %}
+                                <a href="{% url 'download_signed_document' document.id %}" 
+                                   class="btn btn-sm btn-outline-success">
+                                    <i class="fas fa-file-signature"></i> Assinado
+                                </a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                <p class="text-muted">Nenhum documento enviado ainda.</p>
+                <a href="{% url 'university_send_document' %}" class="btn btn-primary">
+                    <i class="fas fa-paper-plane"></i> Enviar Primeiro Documento
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

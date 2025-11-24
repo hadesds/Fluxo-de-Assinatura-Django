@@ -1,0 +1,209 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ document.title }} - {{ university.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item">
+                <a href="{% url 'university_dashboard' %}">Dashboard</a>
+            </li>
+            <li class="breadcrumb-item active">{{ document.title }}</li>
+        </ol>
+    </nav>
+
+    <div class="row">
+        <!-- Coluna Principal -->
+        <div class="col-md-8">
+            <!-- Informações do Documento -->
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">
+                        <i class="fas fa-file-alt"></i>
+                        {{ document.title }}
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <p class="lead">{{ document.description }}</p>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p class="mb-2">
+                                <strong>Escola de Saúde:</strong><br>
+                                {{ document.health_school.name }}
+                            </p>
+                            <p class="mb-2">
+                                <strong>Enviado por:</strong><br>
+                                {{ document.created_by.get_full_name|default:document.created_by.username }}
+                            </p>
+                        </div>
+                        <div class="col-md-6">
+                            <p class="mb-2">
+                                <strong>Data de Envio:</strong><br>
+                                {{ document.created_at|date:"d/m/Y às H:i" }}
+                            </p>
+                            {% if document.num_students > 0 %}
+                            <p class="mb-2">
+                                <strong>Estudantes:</strong><br>
+                                {{ document.num_students }} estudante(s)
+                            </p>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- Botões de Download -->
+                    <div class="d-grid gap-2 d-md-flex">
+                        <a href="{% url 'download_original_document' document.id %}" 
+                           class="btn btn-outline-primary">
+                            <i class="fas fa-download"></i> Baixar Original
+                        </a>
+                        {% if document.signed_file %}
+                        <a href="{% url 'download_signed_document' document.id %}" 
+                           class="btn btn-success">
+                            <i class="fas fa-file-signature"></i> Baixar Assinado
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Assinaturas -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-signature"></i>
+                        Assinaturas Digitais
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if signatures %}
+                    <div class="list-group">
+                        {% for signature in signatures %}
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="mb-1">
+                                        <i class="fas fa-user-check text-success"></i>
+                                        {{ signature.signer_name }}
+                                    </h6>
+                                    <p class="mb-1">
+                                        <small class="text-muted">CPF: {{ signature.signer_cpf }}</small><br>
+                                        <small class="text-muted">{{ signature.signer_email }}</small>
+                                    </p>
+                                    <small class="text-muted">
+                                        <i class="fas fa-clock"></i>
+                                        {{ signature.signed_at|date:"d/m/Y às H:i:s" }}
+                                    </small>
+                                </div>
+                                <div>
+                                    <span class="badge bg-success fs-6">
+                                        <i class="fas fa-check-circle"></i> Assinado
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <small class="text-muted font-monospace">
+                                    Hash: {{ signature.signature_hash|truncatechars:40 }}
+                                </small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-center text-muted py-4">
+                        <i class="fas fa-pen fa-2x mb-3"></i>
+                        <p>Documento ainda não foi assinado.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Coluna Lateral -->
+        <div class="col-md-4">
+            <!-- Status -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h6 class="mb-0">
+                        <i class="fas fa-info-circle"></i>
+                        Status do Documento
+                    </h6>
+                </div>
+                <div class="card-body">
+                    {% if document.status == 'pending_health_school' %}
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-clock fa-2x d-block mb-2"></i>
+                        <strong>Aguardando Assinatura</strong>
+                        <p class="mb-0 small">
+                            O documento foi enviado para {{ document.health_school.name }} 
+                            e aguarda assinatura.
+                        </p>
+                    </div>
+                    {% elif document.status == 'signed_health_school' %}
+                    <div class="alert alert-success mb-0">
+                        <i class="fas fa-check-circle fa-2x d-block mb-2"></i>
+                        <strong>Documento Assinado</strong>
+                        <p class="mb-0 small">
+                            A escola de saúde assinou o documento digitalmente.
+                        </p>
+                    </div>
+                    {% elif document.status == 'completed' %}
+                    <div class="alert alert-info mb-0">
+                        <i class="fas fa-check-double fa-2x d-block mb-2"></i>
+                        <strong>Processo Concluído</strong>
+                        <p class="mb-0 small">
+                            Todas as etapas foram concluídas.
+                        </p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Histórico -->
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">
+                        <i class="fas fa-history"></i>
+                        Histórico
+                    </h6>
+                </div>
+                <div class="card-body">
+                    {% if history %}
+                    <div class="timeline">
+                        {% for item in history %}
+                        <div class="timeline-item mb-3">
+                            <div class="d-flex">
+                                <div class="timeline-marker me-3">
+                                    <i class="fas fa-circle text-primary"></i>
+                                </div>
+                                <div>
+                                    <strong>{{ item.get_action_display }}</strong>
+                                    <br>
+                                    <small class="text-muted">
+                                        {{ item.performed_by.get_full_name|default:item.performed_by.username }}
+                                    </small>
+                                    <br>
+                                    <small class="text-muted">
+                                        {{ item.created_at|date:"d/m/Y H:i" }}
+                                    </small>
+                                    {% if item.notes %}
+                                    <p class="mb-0 mt-1 small">{{ item.notes }}</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="text-muted small mb-0">Nenhum histórico disponível.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
