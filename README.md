@@ -8,13 +8,20 @@ O sistema utiliza o framework Django e Python, com autenticação baseada em fun
 
 * **Autenticação por Função:** Separação de acesso para administradores de Universidades e Escolas de Saúde.
 * **Gestão de Documentos:** Envio de documentos de estágio pela Universidade para a Escola de Saúde.
-* **Assinatura Digital:** Processo de assinatura digital na interface da Escola de Saúde (requer CPF para autenticação).
-* **Auditoria:** Registro de histórico de status e assinaturas digitais completas (Nome, CPF, Hash da Assinatura, Data/Hora).
-* **Download:** Permite o download do documento original e do documento assinado.
+* **Assinatura Visual e Precisa:** A Escola de Saúde pode visualizar o PDF no navegador (via PDF.js) e **clicar na área exata** onde o carimbo da assinatura deve ser aplicado.
+* **Carimbo Digital com QR Code:** O backend gera e insere um carimbo com o nome do signatário, CPF, data/hora e um QR Code de validação.
+* **Autenticação por Função:** Controle de acesso estrito para administradores de Universidades e Escolas de Saúde.
+* **Auditoria Completa:** Registro de histórico de status e assinaturas digitais com dados de IP/User Agent.
+* **Downloads:** Permite o download do documento original e do documento assinado/carimbado.
 
-## ⚙️ Arquitetura do Projeto
+## ⚙️ Arquitetura do Processo de Assinatura
 
-O projeto é estruturado em torno da aplicação `fluxo`.
+O processo de assinatura é dividido entre Frontend e Backend:
+
+| Etapa | Tecnologia | Descrição |
+| :--- | :--- | :--- |
+| **Frontend** | HTML, JavaScript, **PDF.js** | Renderiza o PDF em um elemento `<canvas>`. Ao clicar, calcula e envia as coordenadas (X, Y) exatas para o servidor. |
+| **Backend** | Python, **PyPDF2**, **ReportLab**, **qrcode** | Recebe as coordenadas, gera um PDF de carimbo (com texto e QR Code) usando ReportLab, e mescla esse carimbo na primeira página do PDF original usando PyPDF2. |
 
 ### Modelos Chave (`fluxo/models.py`)
 
@@ -41,12 +48,23 @@ O projeto é estruturado em torno da aplicação `fluxo`.
 
 ### Pré-requisitos
 
-* Python 3.x
+* Python 3.10+ (Recomendado)
+* Git (Opcional, para clonagem)
 * Django 5.2.8
 * Dependências listadas em `requirements.txt`
+* **Dependências de Sistema** (Crucial para compilar `Pillow` e `ReportLab`)
 
-### 1. Ambiente Virtual
+### 2. Instalar Dependências de Sistema
+
+Devido à natureza das bibliotecas de PDF e imagem, são necessários pacotes de desenvolvimento do sistema operacional (OS headers).
+
+### 2. Ambiente Virtual
 
 ```bash
 python -m venv venv
-source venv/bin/activate  # ou venv\Scripts\activate no Windows
+source venv/bin/activate ou venv\Scripts\activate no Windows
+
+#### 🐧 Para Arch Linux (seu ambiente):
+
+```bash
+sudo pacman -S --needed zlib libjpeg libtiff libwebp lcms2
