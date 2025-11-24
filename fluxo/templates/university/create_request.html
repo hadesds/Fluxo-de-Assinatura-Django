@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+
+{% block title %}Enviar Novo Documento - {{ university.name }}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            <nav aria-label="breadcrumb" class="mb-4">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item">
+                        <a href="{% url 'university_dashboard' %}">Dashboard</a>
+                    </li>
+                    <li class="breadcrumb-item active">Enviar Documento</li>
+                </ol>
+            </nav>
+
+            <div class="card shadow-lg">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">
+                        <i class="fas fa-paper-plane"></i>
+                        Enviar Novo Documento de Estágio
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <form method="post" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        
+                        <div class="mb-3">
+                            <label for="title" class="form-label">
+                                <i class="fas fa-heading"></i> Título do Documento *
+                            </label>
+                            <input type="text" 
+                                   class="form-control form-control-lg" 
+                                   id="title" 
+                                   name="title" 
+                                   required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="description" class="form-label">
+                                <i class="fas fa-align-left"></i> Descrição
+                            </label>
+                            <textarea class="form-control" 
+                                      id="description" 
+                                      name="description" 
+                                      rows="3"></textarea>
+                        </div>
+                        
+                        <hr>
+
+                        <div class="mb-3">
+                            <label for="health_school" class="form-label">
+                                <i class="fas fa-hospital-alt"></i> Escola de Saúde Destinatária *
+                            </label>
+                            <select class="form-select form-select-lg" 
+                                    id="health_school" 
+                                    name="health_school" 
+                                    required>
+                                <option value="" selected disabled>Selecione a Escola de Saúde</option>
+                                {% for school in health_schools %}
+                                <option value="{{ school.id }}">{{ school.name }} ({{ school.cnpj }})</option>
+                                {% empty %}
+                                <option value="" disabled>Nenhuma Escola de Saúde cadastrada.</option>
+                                {% endfor %}
+                            </select>
+                            {% if not health_schools %}
+                            <div class="alert alert-danger mt-2 small">
+                                Cadastre as escolas no painel de administração antes de enviar um documento.
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="file" class="form-label">
+                                <i class="fas fa-file-pdf"></i> Arquivo PDF Original *
+                            </label>
+                            <input class="form-control form-control-lg" 
+                                   type="file" 
+                                   id="file" 
+                                   name="file" 
+                                   accept="application/pdf"
+                                   required>
+                        </div>
+                        
+                        <div class="alert alert-info small mt-4">
+                            <i class="fas fa-info-circle"></i> **Nota sobre Estudantes:** A lógica detalhada de estudantes foi simplificada neste escopo. Apenas o número de estudantes deve ser informado.
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="num_students" class="form-label">
+                                <i class="fas fa-users"></i> Número de Estudantes Envolvidos
+                            </label>
+                            <input type="number" 
+                                   class="form-control" 
+                                   id="num_students" 
+                                   name="num_students" 
+                                   value="1" 
+                                   min="0" 
+                                   required>
+                        </div>
+
+                        <hr>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                            <a href="{% url 'university_dashboard' %}" 
+                               class="btn btn-secondary btn-lg">
+                                <i class="fas fa-times"></i> Cancelar
+                            </a>
+                            <button type="submit" 
+                                    class="btn btn-primary btn-lg">
+                                <i class="fas fa-paper-plane"></i> Enviar para Assinatura
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

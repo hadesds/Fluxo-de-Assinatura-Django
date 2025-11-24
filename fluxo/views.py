@@ -1,49 +1,61 @@
-# views.py
 from django.shortcuts import render, get_object_or_404, redirect
-from django.contrib.auth.decorators import login_required, user_passes_test
-from django.http import JsonResponse
+from django.contrib.auth.decorators import login_required
+from django.http import HttpResponse, FileResponse
 from django.utils import timezone
 from django.contrib import messages
-from .models import *
-from django.http import HttpResponse
-import hashlib
+from .models import Institution, InternshipDocument, DigitalSignature, DocumentHistory
 import json
+import os 
 
-# Decorators para verificar tipo de instituição
+# --- UTILITIES ---
+
+def get_client_ip(request):
+    """Obtém o endereço IP do cliente (utility necessária para DigitalSignature)."""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0]
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
+
 def university_required(function):
+    """Decorator para exigir que o usuário seja administrador de uma Universidade."""
     def wrapper(request, *args, **kwargs):
-        if request.user.is_authenticated:
-            user_institutions = Institution.objects.filter(admin_users=request.user)
-            if user_institutions.filter(type='university').exists():
-                return function(request, *args, **kwargs)
-        return redirect('access_denied')
+        if request.user.is_authenticated and \
+           Institution.objects.filter(admin_users=request.user, type='university').exists():
+            return function(request, *args, **kwargs)
+        messages.error(request, "Acesso não autorizado para a Universidade.")
+        return redirect('home')
     return wrapper
 
 def health_school_required(function):
+    """Decorator para exigir que o usuário seja administrador de uma Escola de Saúde."""
     def wrapper(request, *args, **kwargs):
-        if request.user.is_authenticated:
-            user_institutions = Institution.objects.filter(admin_users=request.user)
-            if user_institutions.filter(type='health_school').exists():
-                return function(request, *args, **kwargs)
-        return redirect('access_denied')
+        if request.user.is_authenticated and \
+           Institution.objects.filter(admin_users=request.user, type='health_school').exists():
+            return function(request, *args, **kwargs)
+        messages.error(request, "Acesso não autorizado para a Escola de Saúde.")
+        return redirect('home')
     return wrapper
 
-# --- INTERFACE DA UNIVERSIDADE ---
+# --- 1. INTERFACE DA UNIVERSIDADE ---
 
 @login_required
 @university_required
 def university_dashboard(request):
-    university = Institution.objects.filter(admin_users=request.user, type='university').first()
+    """Dashboard principal da Universidade (usa university/dashboard.html)."""
+    #
+    university = get_object_or_404(Institution, admin_users=request.user, type='university')
     
+    #
     documents = InternshipDocument.objects.filter(university=university).order_by('-created_at')
     
+    # Mapeamento dos STATUS_CHOICES de models.py para as chaves do template university/dashboard.html
     status_counts = {
-        'draft': documents.filter(status='draft').count(),
-        'pending_students': documents.filter(status='pending_students').count(),
-        'pending_university': documents.filter(status='pending_university').count(),
-        'pending_health_school': documents.filter(status='pending_health_school').count(),
-        'approved': documents.filter(status='approved').count(),
-        'rejected': documents.filter(status='rejected').count(),
+        'pending': documents.filter(status='pending_health_school').count(), # Aguardando Assinatura
+        'signed': documents.filter(status='signed_health_school').count(),   # Assinados
+        'completed': documents.filter(status='completed').count(),         # Concluídos
+        'total': documents.count(),                                         # Total
     }
     
     return render(request, 'university/dashboard.html', {
@@ -54,283 +66,257 @@ def university_dashboard(request):
 
 @login_required
 @university_required
-def create_internship_request(request):
-    university = Institution.objects.filter(admin_users=request.user, type='university').first()
+def university_send_document(request):
+    """View para criar e enviar um novo documento de estágio."""
+    #
+    university = get_object_or_404(Institution, admin_users=request.user, type='university')
+    #
     health_schools = Institution.objects.filter(type='health_school')
-    students = Student.objects.filter(university=university)
+    
+    # Estudantes
+    students = []
     
     if request.method == 'POST':
         title = request.POST.get('title')
         description = request.POST.get('description')
         health_school_id = request.POST.get('health_school')
-        student_ids = request.POST.getlist('students')
+        num_students = int(request.POST.get('num_students', 0))
         file = request.FILES.get('file')
         
+        #
         health_school = get_object_or_404(Institution, id=health_school_id, type='health_school')
         
+        # Criação do Documento
+        #
         document = InternshipDocument.objects.create(
             title=title,
             description=description,
             university=university,
             health_school=health_school,
-            file=file,
+            original_file=file,
             created_by=request.user,
-            status='pending_students'
+            status='pending_health_school', 
+            num_students=num_students,
+            student_info=json.dumps({'num_students': num_students})
         )
         
-        # Adicionar estudantes como signatários
-        for student_id in student_ids:
-            student = Student.objects.get(id=student_id, university=university)
-            DocumentSigner.objects.create(
-                document=document,
-                student=student,
-                signer_type='student',
-                user=student.user
-            )
-        
-        # Adicionar coordenador da universidade como signatário
-        DocumentSigner.objects.create(
+        # Adicionar o histórico de criação
+        #
+        DocumentHistory.objects.create(
             document=document,
-            signer_type='university_coordinator',
-            user=request.user
+            action='sent',
+            performed_by=request.user,
+            notes='Documento enviado para assinatura da Escola de Saúde'
         )
         
-        # Adicionar coordenador da escola de saúde como signatário
-        health_school_admin = health_school.admin_users.first()
-        if health_school_admin:
-            DocumentSigner.objects.create(
-                document=document,
-                signer_type='health_school_coordinator',
-                user=health_school_admin
-            )
-        
-        DocumentStatusHistory.objects.create(
+        # Cria a DigitalSignature para o remetente (Universidade)
+        #
+        DigitalSignature.objects.create(
             document=document,
-            from_status='draft',
-            to_status='pending_students',
-            changed_by=request.user,
-            notes='Documento criado e enviado para assinatura dos estudantes'
+            signer=request.user,
+            signer_type='university', #
+            signature_data=json.dumps({'notes': 'Enviado/Assinado pela Universidade'}),
+            signature_hash=document.original_hash[:64] if document.original_hash else 'NOHASH',
+            ip_address=get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            signer_name=request.user.get_full_name() or request.user.username,
+            signer_email=request.user.email,
+            signer_cpf='000.000.000-00'
         )
-        
-        return redirect('university_document_detail', document_id=document.id)
+
+        messages.success(request, f'Documento "{document.title}" enviado com sucesso.')
+        return redirect('university_view_document', document_id=document.id)
     
+    # GET request renderiza o template
     return render(request, 'university/create_request.html', {
+        'university': university,
         'health_schools': health_schools,
         'students': students
     })
 
 @login_required
 @university_required
-def university_document_detail(request, document_id):
-    university = Institution.objects.filter(admin_users=request.user, type='university').first()
+def university_view_document(request, document_id):
+    """Detalhes de um documento na visão da Universidade (usa university/view_document.html)."""
+    #
+    university = get_object_or_404(Institution, admin_users=request.user, type='university')
+    #
     document = get_object_or_404(InternshipDocument, id=document_id, university=university)
-    signers = document.documentsigner_set.all()
-    progress = document.get_signature_progress()
-    status_history = DocumentStatusHistory.objects.filter(document=document).order_by('-created_at')
     
-    return render(request, 'university/document_detail.html', {
+    #
+    signatures = document.signatures.all()
+    #
+    history = document.history.all()
+    
+    return render(request, 'university/view_document.html', {
         'document': document,
-        'signers': signers,
-        'progress': progress,
-        'status_history': status_history
+        'university': university,
+        'signatures': signatures,
+        'history': history,
     })
 
-# --- INTERFACE DA ESCOLA DE SAÚDE ---
+# --- 2. INTERFACE DA ESCOLA DE SAÚDE ---
 
 @login_required
 @health_school_required
 def health_school_dashboard(request):
-    health_school = Institution.objects.filter(admin_users=request.user, type='health_school').first()
+    """Dashboard principal da Escola de Saúde. (Falta template)"""
+    messages.info(request, "Dashboard da Escola de Saúde não possui template no escopo.")
+    return redirect('home')
+
+@login_required
+@health_school_required
+def health_school_view_document(request, document_id):
+    """Detalhes de um documento na visão da Escola de Saúde (usa health_school/view_document.html)."""
+    #
+    health_school = get_object_or_404(Institution, admin_users=request.user, type='health_school')
+    #
+    document = get_object_or_404(InternshipDocument, id=document_id, health_school=health_school)
     
-    documents = InternshipDocument.objects.filter(health_school=health_school).order_by('-created_at')
+    #
+    signatures = document.signatures.all() # DigitalSignature
+    #
+    history = document.history.all()       # DocumentHistory
     
-    status_counts = {
-        'pending_health_school': documents.filter(status='pending_health_school').count(),
-        'approved': documents.filter(status='approved').count(),
-        'rejected': documents.filter(status='rejected').count(),
-        'total': documents.count()
-    }
-    
-    return render(request, 'health_school/dashboard.html', {
+    return render(request, 'health_school/view_document.html', {
+        'document': document,
         'health_school': health_school,
-        'documents': documents,
-        'status_counts': status_counts
+        'signatures': signatures,
+        'history': history,
     })
 
 @login_required
 @health_school_required
-def health_school_document_detail(request, document_id):
-    health_school = Institution.objects.filter(admin_users=request.user, type='health_school').first()
+def health_school_sign_document(request, document_id):
+    """Exibe o formulário de assinatura e processa o POST (usa health_school/sign_document.html)."""
+    #
+    health_school = get_object_or_404(Institution, admin_users=request.user, type='health_school')
+    #
     document = get_object_or_404(InternshipDocument, id=document_id, health_school=health_school)
-    signers = document.documentsigner_set.all()
-    progress = document.get_signature_progress()
-    status_history = DocumentStatusHistory.objects.filter(document=document).order_by('-created_at')
-    
-    # Verificar se usuário atual é signatário
-    user_signer = signers.filter(user=request.user).first()
-    
-    return render(request, 'health_school/document_detail.html', {
-        'document': document,
-        'signers': signers,
-        'progress': progress,
-        'status_history': status_history,
-        'user_signer': user_signer
-    })
 
-# --- ASSINATURA ELETRÔNICA ---
+    # Verifica se já está assinado pela Escola de Saúde (pelo usuário atual)
+    if DigitalSignature.objects.filter(document=document, signer=request.user, signer_type='health_school').exists():
+        messages.info(request, "Este documento já foi assinado por você.")
+        return redirect('health_school_view_document', document_id=document.id)
 
-@login_required
-def sign_document(request, document_id):
-    document = get_object_or_404(InternshipDocument, id=document_id)
-    signer = get_object_or_404(DocumentSigner, document=document, user=request.user)
-    
-    if signer.signed_at:
-        return JsonResponse({'error': 'Documento já assinado'}, status=400)
-    
     if request.method == 'POST':
-        # Processar assinatura
+        signer_cpf = request.POST.get('signer_cpf')
+        
+        if not signer_cpf:
+            messages.error(request, "O CPF é obrigatório para a assinatura digital.")
+            return redirect('health_school_sign_document', document_id=document.id)
+            
+        # 1. Prepara dados da assinatura
         signature_data = {
             'signer_name': request.user.get_full_name() or request.user.username,
             'signer_email': request.user.email,
-            'signer_type': signer.signer_type,
+            'signer_type': 'health_school',
             'signing_timestamp': timezone.now().isoformat(),
             'document_hash': document.original_hash,
-            'signing_reason': 'Concordo com os termos do documento de estágio',
-            'ip_address': get_client_ip(request),
-            'user_agent': request.META.get('HTTP_USER_AGENT', '')
+            'signing_reason': 'Assinatura digital pela Escola de Saúde',
         }
         
-        signer.signed_at = timezone.now()
-        signer.signature_data = json.dumps(signature_data)
-        signer.signature_hash = signer.generate_signature_hash()
-        signer.ip_address = get_client_ip(request)
-        signer.user_agent = request.META.get('HTTP_USER_AGENT', '')
-        signer.save()
+        # 2. Cria o objeto DigitalSignature
+        signature = DigitalSignature.objects.create(
+            document=document,
+            signer=request.user,
+            signer_type='health_school',
+            signature_data=json.dumps(signature_data),
+            ip_address=get_client_ip(request),
+            user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            signer_name=request.user.get_full_name() or request.user.username,
+            signer_email=request.user.email,
+            signer_cpf=signer_cpf
+        )
         
-        # Atualizar status do documento baseado no progresso
-        update_document_status(document, request.user)
+        # 3. Gera o hash da assinatura e salva
+        signature.signature_hash = signature.generate_signature_hash()
+        signature.save()
         
-        return JsonResponse({'success': True, 'message': 'Documento assinado com sucesso'})
+        # 4. Atualiza o status do documento para 'signed_health_school'
+        document.status = 'signed_health_school'
+        document.save()
+        
+        # 5. Adiciona o histórico
+        DocumentHistory.objects.create(
+            document=document,
+            action='signed',
+            performed_by=request.user,
+            notes='Documento assinado digitalmente pela Escola de Saúde'
+        )
+        
+        messages.success(request, f'Documento "{document.title}" assinado com sucesso! Enviado de volta para a universidade.')
+        return redirect('health_school_view_document', document_id=document.id)
     
-    return JsonResponse({'error': 'Método não permitido'}, status=405)
+    # GET request - Renderiza o template de assinatura
+    return render(request, 'health_school/sign_document.html', {
+        'document': document,
+        'health_school': health_school,
+        'user': request.user
+    })
 
-def update_document_status(document, changed_by):
-    progress = document.get_signature_progress()
-    old_status = document.status
+
+# --- 3. DOWNLOADS ---
+
+@login_required
+def download_document(request, document_id, file_type):
+    """Função auxiliar para downloads."""
+    #
+    document = get_object_or_404(InternshipDocument, id=document_id)
     
-    if progress['signed'] == progress['total']:
-        new_status = 'approved'
-    elif document.status == 'pending_students' and progress['signed'] > 0:
-        # Verificar se todos os estudantes assinaram
-        student_signers = document.documentsigner_set.filter(signer_type='student')
-        signed_students = student_signers.filter(signed_at__isnull=False).count()
-        if signed_students == student_signers.count():
-            new_status = 'pending_health_school'
-        else:
-            new_status = document.status
+    # Verifica permissão: Usuário deve ser da University ou Health School envolvida
+    is_authorized = document.university.admin_users.filter(id=request.user.id).exists() or \
+                    document.health_school.admin_users.filter(id=request.user.id).exists()
+    
+    if not is_authorized:
+        messages.error(request, "Você não tem permissão para acessar este documento.")
+        return redirect('home')
+
+    if file_type == 'original':
+        file_field = document.original_file #
+        filename = f"{document.title.replace(' ', '_')}_ORIGINAL.pdf"
+    elif file_type == 'signed':
+        file_field = document.signed_file #
+        filename = f"{document.title.replace(' ', '_')}_ASSINADO.pdf"
     else:
-        new_status = document.status
-    
-    if old_status != new_status:
-        document.status = new_status
-        document.save()
-        
-        DocumentStatusHistory.objects.create(
-            document=document,
-            from_status=old_status,
-            to_status=new_status,
-            changed_by=changed_by,
-            notes=f'Status alterado devido ao progresso das assinaturas'
-        )
+        return HttpResponse("Tipo de arquivo inválido", status=400)
+
+    if not file_field:
+        messages.error(request, f"Arquivo {file_type} não encontrado para este documento.")
+        return redirect(request.META.get('HTTP_REFERER', 'home'))
+
+    # Serve o arquivo do FileField
+    # A leitura direta de file_field.read() é usada aqui para simular o download
+    response = HttpResponse(file_field.read(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
 
 @login_required
-@health_school_required
-def approve_document(request, document_id):
-    health_school = Institution.objects.filter(admin_users=request.user, type='health_school').first()
-    document = get_object_or_404(InternshipDocument, id=document_id, health_school=health_school)
-    
-    if request.method == 'POST':
-        old_status = document.status
-        document.status = 'approved'
-        document.save()
-        
-        DocumentStatusHistory.objects.create(
-            document=document,
-            from_status=old_status,
-            to_status='approved',
-            changed_by=request.user,
-            notes='Documento aprovado pela Escola de Saúde'
-        )
-        
-        return JsonResponse({'success': True, 'message': 'Documento aprovado com sucesso'})
-    
-    return JsonResponse({'error': 'Método não permitido'}, status=405)
+def download_original_document(request, document_id):
+    """Faz o download do arquivo original."""
+    return download_document(request, document_id, 'original')
 
 @login_required
-@health_school_required
-def reject_document(request, document_id):
-    health_school = Institution.objects.filter(admin_users=request.user, type='health_school').first()
-    document = get_object_or_404(InternshipDocument, id=document_id, health_school=health_school)
-    
-    if request.method == 'POST':
-        notes = request.POST.get('notes', '')
-        old_status = document.status
-        document.status = 'rejected'
-        document.save()
-        
-        DocumentStatusHistory.objects.create(
-            document=document,
-            from_status=old_status,
-            to_status='rejected',
-            changed_by=request.user,
-            notes=f'Documento reprovado: {notes}'
-        )
-        
-        return JsonResponse({'success': True, 'message': 'Documento reprovado'})
-    
-    return JsonResponse({'error': 'Método não permitido'}, status=405)
+def download_signed_document(request, document_id):
+    """Faz o download do arquivo assinado."""
+    return download_document(request, document_id, 'signed')
+
+
+# --- 4. REDIRECIONAMENTO ---
 
 def home_redirect(request):
-    """Redireciona usuário para o dashboard correto ou página inicial"""
+    """Redireciona usuário para o dashboard correto ou página inicial (usa base.html)."""
     if not request.user.is_authenticated:
-        return render(request, 'home.html')
+        return render(request, 'home.html') 
     
-    try:
-        # Verificar se é administrador da universidade
-        university_institutions = Institution.objects.filter(admin_users=request.user, type='university')
-        if university_institutions.exists():
-            return redirect('university_dashhomeboard')
-        
-        # Verificar se é administrador da escola de saúde
-        health_school_institutions = Institution.objects.filter(admin_users=request.user, type='health_school')
-        if health_school_institutions.exists():
-            return redirect('health_school_dashboard')
-        
-        # Verificar se é estudante
-        if Student.objects.filter(user=request.user).exists():
-            return redirect('student_dashboard')
-        
-    except Exception as e:
-        # Em caso de erro, redireciona para login
-        print(f"Erro no redirecionamento: {e}")
-        return render(request, 'home.html')
-
-def get_client_ip(request):
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-    if x_forwarded_for:
-        ip = x_forwarded_for.split(',')[0]
-    else:
-        ip = request.META.get('REMOTE_ADDR')
-    return ip
-
-@login_required
-def student_dashboard(request):
-    """Dashboard básico para estudantes"""
-    try:
-        student = Student.objects.get(user=request.user)
-        return render(request, 'student/dashboard.html', {
-            'student': student,
-        })
-    except Student.DoesNotExist:
-        messages.error(request, "Acesso permitido apenas para estudantes.")
-        return redirect('home')
+    #
+    if Institution.objects.filter(admin_users=request.user, type='university').exists():
+        return redirect('university_dashboard')
+    
+    #
+    if Institution.objects.filter(admin_users=request.user, type='health_school').exists():
+        return redirect('health_school_dashboard')
+    
+    # Usuário logado sem papel definido
+    messages.info(request, "Seu perfil não tem um dashboard associado.")
+    return redirect('admin:index')

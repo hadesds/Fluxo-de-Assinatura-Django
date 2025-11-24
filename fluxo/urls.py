@@ -1,4 +1,4 @@
-# fluxo_assinatura/urls.py
+# fluxo/urls.py - CORRIGIDO
 from django.urls import path
 from . import views
 

@@ -1,22 +1,20 @@
+# Assinatura/urls.py - AJUSTADO
 """
 URL configuration for Assinatura project.
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+...
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
+from django.contrib.auth import views as auth_views # Importa views de autenticação
+from fluxo import views as fluxo_views # Importa views do app fluxo
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    # Rota raiz/home (irá redirecionar para o dashboard apropriado)
+    path('', fluxo_views.home_redirect, name='home'),
+    # Inclui todas as URLs da aplicação 'fluxo'
+    path('', include('fluxo.urls')),
+    
+    # URLs de Autenticação (Necessário para o botão 'Sair' em base.html)
+    path('logout/', auth_views.LogoutView.as_view(), name='logout'),
 ]
