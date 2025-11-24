@@ -9,7 +9,7 @@ reportlab==4.0.9
 
 # QR Code Generation
 qrcode[pil]==7.4.2
-Pillow==10.2.0
+Pillow>=10.3.0
 
 # Utilities
 python-dateutil==2.8.2
