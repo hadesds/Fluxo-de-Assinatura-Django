@@ -1,4 +1,3 @@
-# Assinatura/urls.py
 """
 URL configuration for Assinatura project.
 ...
@@ -12,12 +11,8 @@ from django.conf.urls.static import static
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # Rota raiz/home (irá redirecionar para o dashboard apropriado)
     path('', fluxo_views.home_redirect, name='home'),
-    # Inclui todas as URLs da aplicação 'fluxo'
     path('', include('fluxo.urls')),
-    
-    # URLs de Autenticação (Necessário para o botão 'Sair' em base.html)
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
 ]
 
